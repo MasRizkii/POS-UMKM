@@ -2,8 +2,10 @@
 import { Link } from '@inertiajs/vue3';
 import { ArrowRight, QrCode, Banknote } from 'lucide-vue-next';
 import { useCurrency } from '@/Composables/useCurrency';
+import { useDateTime } from '@/Composables/useDateTime';
 
 const { formatRupiah } = useCurrency();
+const { timeZoneLabel } = useDateTime();
 
 defineProps({
     transactions: {
@@ -50,7 +52,7 @@ defineProps({
                             #{{ trx.invoice_number }}
                         </td>
                         <td class="py-3 px-3 text-text-muted text-xs whitespace-nowrap">
-                            {{ trx.formatted_time || 'Baru saja' }}
+                            {{ trx.formatted_time ? `${trx.formatted_time} ${timeZoneLabel}` : 'Baru saja' }}
                         </td>
                         <td class="py-3 px-3 font-medium text-text-primary max-w-xs truncate">
                             {{ trx.notes || (trx.items ? trx.items.map(i => i.product_name_snapshot + ' x' + i.quantity).join(', ') : 'Pesanan Minuman') }}

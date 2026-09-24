@@ -2,16 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\PaymentMethod;
+use App\Enums\TransactionStatus;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\Setting;
 use App\Models\Shift;
 use App\Models\Transaction;
-use App\Models\TransactionItem;
+use App\Services\Audit\AuditLoggerService;
 use App\Services\POS\InvoiceGeneratorService;
+use App\Services\POS\Money;
+use App\Services\POS\SalesQuery;
+use App\Services\POS\StoreTime;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -19,7 +24,11 @@ use Inertia\Response;
 class POSController extends Controller
 {
     public function __construct(
-        protected InvoiceGeneratorService $invoiceGenerator
+        protected InvoiceGeneratorService $invoiceGenerator,
+        protected AuditLoggerService $auditLogger,
+        protected Money $money,
+        protected SalesQuery $sales,
+        protected StoreTime $storeTime,
     ) {}
 
     public function index(Request $request): Response
@@ -44,10 +53,11 @@ class POSController extends Controller
         $setting = Setting::current();
 
         // 5. Quick Metrics Hari Ini
-        $today = Carbon::today();
-        $completedToday = Transaction::whereDate('created_at', $today)->where('status', 'completed');
-        $todayOrdersCount = $completedToday->count();
-        $registerTotal = $activeShift ? $activeShift->opening_cash + $activeShift->cash_sales : 1850000;
+        $todayQuery = $this->sales->within($this->sales->visibleTo($user), $this->storeTime->range('today'));
+        $todayOrdersCount = $this->sales->metrics($todayQuery)['count'];
+        $registerTotal = $activeShift
+            ? $this->money->fromMinor($this->money->toMinor($activeShift->opening_cash) + $this->money->toMinor($activeShift->cash_sales))
+            : '0.00';
 
         return Inertia::render('POS/Index', [
             'categories' => $categories,
@@ -59,8 +69,10 @@ class POSController extends Controller
                 'tax_percentage' => (float) $setting->tax_percentage,
                 'service_charge_enabled' => $setting->service_charge_enabled,
                 'service_charge_percentage' => (float) $setting->service_charge_percentage,
+                'cash_enabled' => $setting->cash_enabled,
+                'qris_enabled' => $setting->qris_enabled,
             ],
-            'todayOrdersCount' => $todayOrdersCount > 0 ? $todayOrdersCount : 148,
+            'todayOrdersCount' => $todayOrdersCount,
             'registerTotal' => $registerTotal,
         ]);
     }
@@ -81,6 +93,7 @@ class POSController extends Controller
             'items.*.note' => ['nullable', 'string', 'max:255'],
             'payment_method' => ['required', 'in:cash,qris'],
             'amount_paid' => ['required', 'numeric', 'min:0'],
+            'idempotency_key' => ['required', 'uuid'],
         ]);
 
         // 2. Pastikan Kasir Memiliki Shift Aktif
@@ -90,108 +103,134 @@ class POSController extends Controller
             ->first();
 
         if (! $activeShift) {
-            // Jika belum ada shift, buatkan shift default untuk kemudahan testing
-            $activeShift = Shift::create([
-                'user_id' => $user->id,
-                'opening_cash' => 500000,
-                'cash_sales' => 0,
-                'expected_cash' => 500000,
-                'status' => 'open',
-                'opened_at' => now(),
-                'notes' => 'Shift Otomatis Kasir',
-            ]);
+            return response()->json(['message' => 'Tidak ada shift aktif. Buka shift terlebih dahulu sebelum checkout.'], 422);
         }
 
         // 3. Konfigurasi Pajak Toko
         $setting = Setting::current();
 
-        return DB::transaction(function () use ($validated, $user, $activeShift, $setting) {
-            $subtotal = 0;
-            $itemsToCreate = [];
+        if ($validated['payment_method'] === PaymentMethod::CASH->value && ! $setting->cash_enabled) {
+            return response()->json(['message' => 'Pembayaran tunai sedang tidak tersedia.'], 422);
+        }
 
-            // 4. Validasi Ulang Setiap Produk dari Database (Server as Single Source of Truth)
-            foreach ($validated['items'] as $itemData) {
-                $product = Product::lockForUpdate()->find($itemData['product_id']);
+        if ($validated['payment_method'] === PaymentMethod::QRIS->value && ! $setting->qris_enabled) {
+            return response()->json(['message' => 'Pembayaran QRIS sedang tidak tersedia.'], 422);
+        }
 
-                if (! $product || $product->status === 'tidak_tersedia') {
-                    return response()->json([
-                        'message' => 'Produk ' . ($product?->name ?? 'item') . ' sedang tidak tersedia atau habis.',
-                    ], 422);
+        try {
+            return DB::transaction(function () use ($validated, $user, $activeShift, $setting) {
+                $existingTransaction = Transaction::where('user_id', $user->id)
+                    ->where('shift_id', $activeShift->id)
+                    ->where('idempotency_key', $validated['idempotency_key'])
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($existingTransaction) {
+                    return response()->json(['message' => 'Transaksi sudah diproses.', 'transaction' => $existingTransaction->load('items')]);
                 }
 
-                $itemSubtotal = $product->price * $itemData['quantity'];
-                $subtotal += $itemSubtotal;
+                $lockedShift = Shift::whereKey($activeShift->id)->where('status', 'open')->lockForUpdate()->first();
 
-                $itemsToCreate[] = [
-                    'product_id' => $product->id,
-                    'product_name_snapshot' => $product->name,
-                    'unit_price_snapshot' => $product->price,
-                    'quantity' => $itemData['quantity'],
-                    'subtotal' => $itemSubtotal,
-                    'note' => $itemData['note'] ?? null,
-                ];
-            }
-
-            // 5. Kalkulasi Pajak & Service Charge
-            $taxAmount = 0;
-            if ($setting->tax_enabled && $setting->tax_percentage > 0) {
-                $taxAmount = round(($subtotal * $setting->tax_percentage) / 100, 2);
-            }
-
-            $totalAmount = $subtotal + $taxAmount;
-
-            // 6. Validasi Pembayaran Tunai (Cash)
-            $changeDue = 0;
-            if ($validated['payment_method'] === 'cash') {
-                if ($validated['amount_paid'] < $totalAmount) {
-                    return response()->json([
-                        'message' => 'Uang diterima kurang dari total pembayaran.',
-                    ], 422);
+                if (! $lockedShift) {
+                    return response()->json(['message' => 'Shift sudah ditutup. Buka shift baru sebelum checkout.'], 422);
                 }
-                $changeDue = $validated['amount_paid'] - $totalAmount;
-            } else {
-                // QRIS fisik exact amount
-                $validated['amount_paid'] = $totalAmount;
+                $subtotalMinor = 0;
+                $itemsToCreate = [];
+
+                // 4. Validasi Ulang Setiap Produk dari Database (Server as Single Source of Truth)
+                foreach ($validated['items'] as $itemData) {
+                    $product = Product::lockForUpdate()->find($itemData['product_id']);
+
+                    if (! $product || $product->status === 'tidak_tersedia') {
+                        return response()->json([
+                            'message' => 'Produk '.($product?->name ?? 'item').' sedang tidak tersedia atau habis.',
+                        ], 422);
+                    }
+
+                    $itemSubtotalMinor = $this->money->toMinor($product->price) * $itemData['quantity'];
+                    $subtotalMinor += $itemSubtotalMinor;
+
+                    $itemsToCreate[] = [
+                        'product_id' => $product->id,
+                        'product_name_snapshot' => $product->name,
+                        'unit_price_snapshot' => $product->price,
+                        'quantity' => $itemData['quantity'],
+                        'subtotal' => $this->money->fromMinor($itemSubtotalMinor),
+                        'note' => $itemData['note'] ?? null,
+                    ];
+                }
+
+                $taxMinor = $setting->tax_enabled ? $this->money->percentage($subtotalMinor, $setting->tax_percentage) : 0;
+                $serviceChargeMinor = $setting->service_charge_enabled
+                    ? $this->money->percentage($subtotalMinor, $setting->service_charge_percentage)
+                    : 0;
+                $totalMinor = $subtotalMinor + $taxMinor + $serviceChargeMinor;
+                $amountPaidMinor = $this->money->toMinor($validated['amount_paid']);
+
+                if ($validated['payment_method'] === 'cash') {
+                    if ($amountPaidMinor < $totalMinor) {
+                        return response()->json([
+                            'message' => 'Uang diterima kurang dari total pembayaran.',
+                        ], 422);
+                    }
+                    $changeDueMinor = $amountPaidMinor - $totalMinor;
+                } else {
+                    $amountPaidMinor = $totalMinor;
+                    $changeDueMinor = 0;
+                }
+
+                // 7. Generate Nomor Invoice Unik
+                $invoiceNumber = $this->invoiceGenerator->generate($setting->invoice_prefix ?? 'POS');
+
+                // 8. Simpan Transaksi
+                $transaction = Transaction::create([
+                    'invoice_number' => $invoiceNumber,
+                    'idempotency_key' => $validated['idempotency_key'],
+                    'user_id' => $user->id,
+                    'shift_id' => $lockedShift->id,
+                    'subtotal' => $this->money->fromMinor($subtotalMinor),
+                    'tax_amount' => $this->money->fromMinor($taxMinor),
+                    'service_charge_amount' => $this->money->fromMinor($serviceChargeMinor),
+                    'total_amount' => $this->money->fromMinor($totalMinor),
+                    'payment_method' => $validated['payment_method'],
+                    'amount_paid' => $this->money->fromMinor($amountPaidMinor),
+                    'change_due' => $this->money->fromMinor($changeDueMinor),
+                    'status' => TransactionStatus::COMPLETED,
+                    'notes' => implode(', ', array_map(fn ($i) => $i['product_name_snapshot'].' x'.$i['quantity'], $itemsToCreate)),
+                ]);
+
+                // 9. Simpan Snapshot Item Transaksi
+                foreach ($itemsToCreate as $itemSnapshot) {
+                    $transaction->items()->create($itemSnapshot);
+                }
+
+                // 10. Update Kas Shift jika Tunai
+                if ($validated['payment_method'] === 'cash') {
+                    $lockedShift->cash_sales = $this->money->fromMinor($this->money->toMinor($lockedShift->cash_sales) + $totalMinor);
+                    $lockedShift->expected_cash = $this->money->fromMinor($this->money->toMinor($lockedShift->expected_cash) + $totalMinor);
+                    $lockedShift->save();
+                }
+
+                // Load items untuk struk responsif
+                $transaction->load('items');
+                $this->auditLogger->log('CHECKOUT_COMPLETED', 'Transaction', $transaction->id, null, ['invoice_number' => $transaction->invoice_number, 'total_amount' => $transaction->total_amount]);
+
+                return response()->json([
+                    'message' => 'Transaksi berhasil disimpan.',
+                    'transaction' => $transaction,
+                ]);
+            });
+        } catch (QueryException $exception) {
+            $existingTransaction = Transaction::where('user_id', $user->id)
+                ->where('shift_id', $activeShift->id)
+                ->where('idempotency_key', $validated['idempotency_key'])
+                ->first();
+
+            if ($existingTransaction) {
+                return response()->json(['message' => 'Transaksi sudah diproses.', 'transaction' => $existingTransaction->load('items')]);
             }
 
-            // 7. Generate Nomor Invoice Unik
-            $invoiceNumber = $this->invoiceGenerator->generate($setting->invoice_prefix ?? 'POS');
-
-            // 8. Simpan Transaksi
-            $transaction = Transaction::create([
-                'invoice_number' => $invoiceNumber,
-                'user_id' => $user->id,
-                'shift_id' => $activeShift->id,
-                'subtotal' => $subtotal,
-                'tax_amount' => $taxAmount,
-                'service_charge_amount' => 0,
-                'total_amount' => $totalAmount,
-                'payment_method' => $validated['payment_method'],
-                'amount_paid' => $validated['amount_paid'],
-                'change_due' => $changeDue,
-                'status' => 'completed',
-                'notes' => implode(', ', array_map(fn ($i) => $i['product_name_snapshot'] . ' x' . $i['quantity'], $itemsToCreate)),
-            ]);
-
-            // 9. Simpan Snapshot Item Transaksi
-            foreach ($itemsToCreate as $itemSnapshot) {
-                $transaction->items()->create($itemSnapshot);
-            }
-
-            // 10. Update Kas Shift jika Tunai
-            if ($validated['payment_method'] === 'cash') {
-                $activeShift->cash_sales += $totalAmount;
-                $activeShift->expected_cash += $totalAmount;
-                $activeShift->save();
-            }
-
-            // Load items untuk struk responsif
-            $transaction->load('items');
-
-            return response()->json([
-                'message' => 'Transaksi berhasil disimpan.',
-                'transaction' => $transaction,
-            ]);
-        });
+            throw $exception;
+        }
     }
 }

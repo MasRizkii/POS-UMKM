@@ -48,10 +48,7 @@ defineEmits(['update:searchQuery']);
                     <span class="text-[11px] font-bold text-text-muted uppercase tracking-wider">Today's Orders</span>
                     <div class="flex items-baseline gap-1.5 mt-0.5">
                         <span class="text-base sm:text-xl font-black text-text-primary">
-                            {{ todayOrdersCount || 148 }}
-                        </span>
-                        <span class="text-[10px] font-bold text-secondary bg-emerald-50 px-1.5 py-0.5 rounded-md">
-                            +12%
+                            {{ todayOrdersCount }}
                         </span>
                     </div>
                 </div>
@@ -64,7 +61,7 @@ defineEmits(['update:searchQuery']);
                 <div class="flex flex-col min-w-0">
                     <span class="text-[11px] font-bold text-text-muted uppercase tracking-wider">Register Total</span>
                     <span class="text-base sm:text-xl font-black text-text-primary truncate mt-0.5">
-                        {{ formatRupiah(registerTotal || 1850000) }}
+                        {{ formatRupiah(registerTotal) }}
                     </span>
                 </div>
             </div>

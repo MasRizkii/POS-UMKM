@@ -1,6 +1,8 @@
 <script setup>
 import { watch } from 'vue';
 import { useForm } from '@inertiajs/vue3';
+import { useImagePreview } from '@/Composables/useImagePreview';
+import { useCurrency } from '@/Composables/useCurrency';
 import { X, Package, Check, Image as ImageIcon, CheckCircle, AlertCircle } from 'lucide-vue-next';
 
 const props = defineProps({
@@ -19,24 +21,26 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['close']);
+const { currencySymbol } = useCurrency();
 
 const form = useForm({
     category_id: '',
     name: '',
     price: '',
-    image_url: '',
+    image: null,
     description: '',
     status: 'tersedia',
 });
 
 watch(
-    () => props.product,
-    (prod) => {
+    () => [props.product, props.show],
+    ([prod]) => {
+        form.reset();
+        form.clearErrors();
         if (prod) {
             form.category_id = prod.category_id;
             form.name = prod.name;
             form.price = prod.price;
-            form.image_url = prod.image_url || '';
             form.description = prod.description || '';
             form.status = prod.status || 'tersedia';
         } else {
@@ -48,13 +52,22 @@ watch(
     { immediate: true }
 );
 
+const previewUrl = useImagePreview(() => form.image, () => props.product?.image_url);
+
+const selectImage = (event) => {
+    const file = event.target.files[0] || null;
+    form.image = file;
+};
+
 const submit = () => {
     if (props.product) {
-        form.put(route('products.update', props.product.id), {
+        form.transform((data) => ({ ...data, _method: 'put' })).post(route('products.update', props.product.id), {
+            forceFormData: true,
             onSuccess: () => emit('close'),
         });
     } else {
-        form.post(route('products.store'), {
+        form.transform((data) => data).post(route('products.store'), {
+            forceFormData: true,
             onSuccess: () => emit('close'),
         });
     }
@@ -90,28 +103,28 @@ const submit = () => {
 
             <!-- Form Content Scrollable -->
             <form @submit.prevent="submit" class="p-5 space-y-4 overflow-y-auto flex-1">
-                <!-- Image URL & Preview -->
+                <!-- Image file & preview -->
                 <div class="flex flex-col gap-1.5">
-                    <label class="text-xs font-bold text-on-surface">URL Foto Produk (Opsional)</label>
+                    <label class="text-xs font-bold text-on-surface">Foto Produk (Opsional)</label>
                     <div class="flex gap-3 items-center">
                         <div class="w-14 h-14 rounded-xl bg-surface-container-low border border-border-subtle flex items-center justify-center shrink-0 overflow-hidden">
                             <img
-                                v-if="form.image_url"
-                                :src="form.image_url"
+                                v-if="previewUrl"
+                                :src="previewUrl"
                                 alt="Preview"
                                 class="w-full h-full object-cover"
-                                @error="form.image_url = ''"
                             />
                             <ImageIcon v-else class="w-6 h-6 text-text-muted/60" />
                         </div>
                         <input
-                            v-model="form.image_url"
-                            type="url"
-                            placeholder="https://images.unsplash.com/..."
-                            class="flex-1 px-3 py-2 bg-background rounded-xl text-xs text-on-surface border border-border-subtle focus:outline-none focus:ring-1 focus:ring-primary"
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            @change="selectImage"
+                            class="min-w-0 w-full flex-1 px-3 py-2 bg-background rounded-xl text-xs text-on-surface border border-border-subtle focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                     </div>
-                    <p v-if="form.errors.image_url" class="text-xs text-error-alert">{{ form.errors.image_url }}</p>
+                    <p class="text-[10px] text-text-muted">JPG, PNG, atau WEBP. Maksimal 5 MB.</p>
+                    <p v-if="form.errors.image" class="text-xs text-error-alert">{{ form.errors.image }}</p>
                 </div>
 
                 <!-- Product Name -->
@@ -148,13 +161,13 @@ const submit = () => {
                         <p v-if="form.errors.category_id" class="text-xs text-error-alert">{{ form.errors.category_id }}</p>
                     </div>
 
-                    <!-- Price with Rp Prefix -->
+                    <!-- Price with runtime currency prefix -->
                     <div class="flex flex-col gap-1.5">
                         <label class="text-xs font-bold text-on-surface">
-                            Harga Jual (Rp) <span class="text-primary">*</span>
+                            Harga Jual ({{ currencySymbol }}) <span class="text-primary">*</span>
                         </label>
                         <div class="relative">
-                            <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-text-muted">Rp</span>
+                            <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-text-muted">{{ currencySymbol }}</span>
                             <input
                                 v-model="form.price"
                                 type="number"

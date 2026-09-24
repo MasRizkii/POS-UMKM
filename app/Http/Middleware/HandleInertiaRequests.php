@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\Setting;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -34,6 +35,14 @@ class HandleInertiaRequests extends Middleware
             'auth' => [
                 'user' => $request->user(),
             ],
+            'store' => function (): array {
+                $setting = Setting::query()->first(['currency', 'timezone']);
+
+                return [
+                    'currency' => $setting?->currency ?? 'IDR',
+                    'timezone' => $setting?->timezone ?? 'Asia/Jakarta',
+                ];
+            },
         ];
     }
 }

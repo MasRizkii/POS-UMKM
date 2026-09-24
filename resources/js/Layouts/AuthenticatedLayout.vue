@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue';
 import { Link, usePage, router } from '@inertiajs/vue3';
 import OfflineBanner from './Partials/OfflineBanner.vue';
+import { useNetworkStatus } from '@/Composables/useNetworkStatus';
 import {
     LayoutDashboard,
     ShoppingCart,
@@ -9,6 +10,9 @@ import {
     Receipt,
     BarChart3,
     Users,
+    Clock3,
+    Settings,
+    ClipboardList,
     LogOut,
     UtensilsCrossed,
     Menu as MenuIcon,
@@ -22,18 +26,21 @@ const page = usePage();
 const user = computed(() => page.props.auth?.user || {});
 const isAdmin = computed(() => user.value.role === 'admin');
 const currentUrl = computed(() => page.url);
+const { isOnline } = useNetworkStatus();
 
 const showMobileMenu = ref(false);
 
-// 6 Core Menus matching Stitch design and PRD (Audit Log & Settings removed)
 const navLinks = computed(() => {
     const links = [
         { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, adminOnly: false },
         { name: 'Kasir / POS', href: '/pos', icon: ShoppingCart, adminOnly: false },
         { name: 'Produk', href: '/products', icon: Package, adminOnly: true },
         { name: 'Transaksi', href: '/transactions', icon: Receipt, adminOnly: false },
+        { name: 'Shift', href: '/shifts', icon: Clock3, adminOnly: false },
         { name: 'Laporan', href: '/reports', icon: BarChart3, adminOnly: true },
         { name: 'User Management', href: '/users', icon: Users, adminOnly: true },
+        { name: 'Pengaturan', href: '/settings', icon: Settings, adminOnly: true },
+        { name: 'Audit Log', href: '/audits', icon: ClipboardList, adminOnly: true },
     ];
 
     if (!isAdmin.value) {
@@ -135,9 +142,9 @@ const handleLogout = () => {
                 <!-- Right Header Actions (Online indicator, user info, hamburger for mobile) -->
                 <div class="flex items-center gap-3 sm:gap-4">
                     <!-- Status Shift Online Pill -->
-                    <div class="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary-fixed/40 text-secondary text-xs font-semibold">
-                        <span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
-                        <span>Online • Shift Aktif</span>
+                    <div class="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" :class="isOnline ? 'bg-secondary-fixed/40 text-secondary' : 'bg-rose-100 text-error-alert'">
+                        <span class="w-2 h-2 rounded-full" :class="isOnline ? 'bg-secondary animate-pulse' : 'bg-error-alert'"></span>
+                        <span>{{ isOnline ? 'Online' : 'Offline' }}</span>
                     </div>
 
                     <!-- User Profile Snapshot -->

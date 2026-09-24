@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue';
+import { useDateTime } from '@/Composables/useDateTime';
 
 const props = defineProps({
     userName: {
@@ -12,14 +13,8 @@ const props = defineProps({
     },
 });
 
-const todayDate = computed(() => {
-    return new Intl.DateTimeFormat('id-ID', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-    }).format(new Date());
-});
+const { formatDate } = useDateTime();
+const todayDate = computed(() => formatDate(new Date(), { dateStyle: 'full' }));
 </script>
 
 <template>

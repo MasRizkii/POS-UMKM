@@ -2,96 +2,64 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Product;
 use App\Models\Shift;
-use App\Models\Transaction;
+use App\Services\POS\SalesQuery;
+use App\Services\POS\StoreTime;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class DashboardController extends Controller
 {
+    public function __construct(
+        protected SalesQuery $sales,
+        protected StoreTime $storeTime,
+    ) {}
+
     public function index(Request $request): Response
     {
-        $today = Carbon::today();
-
-        // 1. Transaksi Completed Hari Ini (Void tidak dihitung sesuai PRD REPORT-3)
-        $completedToday = Transaction::whereDate('created_at', $today)
-            ->where('status', 'completed')
-            ->get();
-
-        $todayOmzet = $completedToday->sum('total_amount');
-        $todayCount = $completedToday->count();
-        $cashSales = $completedToday->where('payment_method', 'cash')->sum('total_amount');
-        $qrisSales = $completedToday->where('payment_method', 'qris')->sum('total_amount');
-
-        // 2. Active Shift Kasir
-        $activeShift = Shift::with('user')
+        $todayQuery = $this->sales->within($this->sales->visibleTo($request->user()), $this->storeTime->range('today'));
+        $metrics = $this->sales->metrics($todayQuery);
+        $activeShift = Shift::with('user:id,name')
             ->where('status', 'open')
+            ->when(! $request->user()->isAdmin(), fn ($query) => $query->where('user_id', $request->user()->id))
             ->latest()
             ->first();
-
-        // 3. Produk Terlaris
-        $topProducts = Product::with('category')
-            ->where('status', 'tersedia')
-            ->take(5)
-            ->get()
-            ->map(function ($p, $idx) {
-                $sold = max(5, 24 - ($idx * 5));
-                return [
-                    'id' => $p->id,
-                    'name' => $p->name,
-                    'price' => $p->price,
-                    'image_url' => $p->image_url,
-                    'category' => $p->category?->name,
-                    'sold_count' => $sold,
-                    'total_sales' => $p->price * $sold,
-                ];
-            });
-
-        // 4. Transaksi Terakhir
-        $recentTransactions = Transaction::with(['items', 'user'])
+        $topProducts = $this->sales->topProducts($todayQuery)->map(fn ($product) => [
+            'name' => $product->product_name_snapshot,
+            'price' => $product->unit_price,
+            'sold_count' => (int) $product->total_qty,
+            'total_sales' => $product->total_amount,
+        ]);
+        $recentTransactions = $this->sales->visibleTo($request->user())
+            ->with(['items', 'user'])
             ->latest()
-            ->take(6)
+            ->limit(6)
             ->get()
-            ->map(function ($trx) {
+            ->map(function ($transaction) {
                 return [
-                    'id' => $trx->id,
-                    'invoice_number' => $trx->invoice_number,
-                    'total_amount' => $trx->total_amount,
-                    'payment_method' => $trx->payment_method,
-                    'status' => $trx->status,
-                    'notes' => $trx->notes,
-                    'formatted_time' => Carbon::parse($trx->created_at)->format('H:i') . ' WIB',
-                    'items' => $trx->items->map(fn ($i) => [
-                        'product_name_snapshot' => $i->product_name_snapshot,
-                        'quantity' => $i->quantity,
+                    'id' => $transaction->id,
+                    'invoice_number' => $transaction->invoice_number,
+                    'total_amount' => $transaction->total_amount,
+                    'payment_method' => $transaction->payment_method,
+                    'status' => $transaction->status,
+                    'notes' => $transaction->notes,
+                    'formatted_time' => $transaction->created_at->setTimezone($this->storeTime->timezone())->format('H:i'),
+                    'items' => $transaction->items->map(fn ($item) => [
+                        'product_name_snapshot' => $item->product_name_snapshot,
+                        'quantity' => $item->quantity,
                     ]),
                 ];
             });
-
-        // 5. Hourly Trend (Jam 10:00 s.d 20:00)
-        $hourlyData = [
-            ['time' => '10:00', 'total' => 120000],
-            ['time' => '11:00', 'total' => 280000],
-            ['time' => '12:00', 'total' => 850000],
-            ['time' => '13:00', 'total' => 420000],
-            ['time' => '14:00', 'total' => 310000],
-            ['time' => '15:00', 'total' => 260000],
-            ['time' => '16:00', 'total' => 350000],
-            ['time' => '17:00', 'total' => 290000],
-            ['time' => '18:00', 'total' => 180000],
-            ['time' => '19:00', 'total' => 110000],
-            ['time' => '20:00', 'total' => 80000],
-        ];
+        $hourlyData = $this->sales->hourly($todayQuery, $this->storeTime->timezone())
+            ->map(fn (array $row) => ['time' => $row['hour'], 'total' => $row['amount']]);
 
         return Inertia::render('Dashboard/Index', [
             'metrics' => [
-                'omzet' => $todayOmzet > 0 ? $todayOmzet : 2450000,
-                'count' => $todayCount > 0 ? $todayCount : 32,
-                'cash' => $cashSales > 0 ? $cashSales : 1200000,
-                'qris' => $qrisSales > 0 ? $qrisSales : 1250000,
+                'omzet' => $metrics['omzet'],
+                'count' => $metrics['count'],
+                'cash' => $metrics['cash'],
+                'qris' => $metrics['qris'],
             ],
             'activeShift' => $activeShift,
             'topProducts' => $topProducts,

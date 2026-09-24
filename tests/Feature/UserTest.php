@@ -61,4 +61,14 @@ class UserTest extends TestCase
         $response = $this->actingAs($cashier)->get('/users');
         $response->assertForbidden();
     }
+
+    public function test_last_active_admin_cannot_be_demoted_or_deactivated(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'status' => 'active']);
+        $payload = ['name' => $admin->name, 'email' => $admin->email, 'role' => 'cashier', 'status' => 'inactive'];
+
+        $this->actingAs($admin)->put("/users/{$admin->id}", $payload)->assertUnprocessable();
+
+        $this->assertDatabaseHas('users', ['id' => $admin->id, 'role' => 'admin', 'status' => 'active']);
+    }
 }

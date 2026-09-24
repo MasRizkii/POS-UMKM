@@ -30,7 +30,8 @@ class SettingController extends Controller
             'store_name' => ['required', 'string', 'max:255'],
             'store_address' => ['nullable', 'string', 'max:500'],
             'store_phone' => ['nullable', 'string', 'max:50'],
-            'store_logo' => ['nullable', 'string', 'max:2000'],
+            'store_logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'currency' => ['required', 'in:IDR'],
             'invoice_prefix' => ['required', 'string', 'alpha_dash', 'max:10'],
             'timezone' => ['required', 'in:Asia/Jakarta,Asia/Makassar,Asia/Jayapura'],
             'tax_enabled' => ['required', 'boolean'],
@@ -50,6 +51,12 @@ class SettingController extends Controller
 
         $setting = Setting::current();
         $oldValues = $setting->toArray();
+
+        if ($request->hasFile('store_logo')) {
+            $validated['store_logo'] = '/storage/'.$request->file('store_logo')->store('logos', 'public');
+        } else {
+            unset($validated['store_logo']);
+        }
 
         $setting->update($validated);
 

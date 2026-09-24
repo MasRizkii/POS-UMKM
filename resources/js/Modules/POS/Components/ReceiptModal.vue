@@ -2,9 +2,11 @@
 import { Printer, X, CheckCircle2 } from 'lucide-vue-next';
 import { useCurrency } from '@/Composables/useCurrency';
 import { useThermalPrint } from '@/Composables/useThermalPrint';
+import { useDateTime } from '@/Composables/useDateTime';
 
 const { formatRupiah } = useCurrency();
 const { printReceipt } = useThermalPrint();
+const { formatDateTime, timeZoneLabel } = useDateTime();
 
 defineProps({
     show: {
@@ -45,7 +47,7 @@ defineEmits(['close', 'newTransaction']);
                 <div class="text-center pb-2 border-b border-dashed border-border-subtle">
                     <p class="font-bold text-sm">{{ storeName }}</p>
                     <p class="text-[10px] text-text-muted mt-0.5">Struk Pembelian Kasir</p>
-                    <p class="text-[10px] text-text-muted mt-0.5">{{ new Date().toLocaleString('id-ID') }}</p>
+                    <p class="text-[10px] text-text-muted mt-0.5">{{ formatDateTime(transaction.created_at || new Date()) }} {{ timeZoneLabel }}</p>
                 </div>
 
                 <!-- Items -->
@@ -100,7 +102,7 @@ defineEmits(['close', 'newTransaction']);
                     class="py-3 rounded-xl bg-primary hover:bg-primary-dark text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition cursor-pointer"
                 >
                     <X class="w-4 h-4" />
-                    <span>Tutup</span>
+                    <span>Transaksi Baru</span>
                 </button>
             </div>
         </div>

@@ -21,7 +21,7 @@ import {
 } from 'lucide-vue-next';
 
 const { formatRupiah } = useCurrency();
-const { formatDate, formatTime } = useDateTime();
+const { formatDate, formatTime, timeZoneLabel } = useDateTime();
 
 const props = defineProps({
     products: {
@@ -330,7 +330,7 @@ const deleteProduct = (prod) => {
                                 <td class="py-3 px-4 whitespace-nowrap text-text-muted">
                                     <div class="flex flex-col">
                                         <span class="text-xs text-on-surface">{{ formatDate(product.updated_at) }}</span>
-                                        <span class="text-[10px]">{{ formatTime(product.updated_at) }} WIB</span>
+                                        <span class="text-[10px]">{{ formatTime(product.updated_at) }} {{ timeZoneLabel }}</span>
                                     </div>
                                 </td>
 

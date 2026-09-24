@@ -2,89 +2,42 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Transaction;
-use App\Models\TransactionItem;
+use App\Services\POS\SalesQuery;
+use App\Services\POS\StoreTime;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
 {
+    public function __construct(
+        protected SalesQuery $sales,
+        protected StoreTime $storeTime,
+    ) {}
+
     public function index(Request $request): Response
     {
         $datePreset = $request->input('date_preset', 'month');
-        $startDate = $request->input('start_date');
-        $endDate = $request->input('end_date');
-
-        [$start, $end] = $this->resolveDateRange($datePreset, $startDate, $endDate);
-
-        // Hanya transaksi COMPLETED yang dihitung (Void dikecualikan sesuai PRD REPORT-3)
-        $completedTransactions = Transaction::whereBetween('created_at', [$start, $end])
-            ->where('status', 'completed')
-            ->get();
-
-        $omzet = $completedTransactions->sum('total_amount');
-        $trxCount = $completedTransactions->count();
-        $cashSales = $completedTransactions->where('payment_method', 'cash')->sum('total_amount');
-        $qrisSales = $completedTransactions->where('payment_method', 'qris')->sum('total_amount');
-        $atv = $trxCount > 0 ? round($omzet / $trxCount) : 0;
-
-        // Total Produk Terjual
-        $completedIds = $completedTransactions->pluck('id');
-        $itemsSold = TransactionItem::whereIn('transaction_id', $completedIds)->sum('quantity');
-
-        // Top Produk pada periode
-        $topProducts = TransactionItem::whereIn('transaction_id', $completedIds)
-            ->selectRaw('product_name_snapshot, sum(quantity) as total_qty, sum(subtotal) as total_amount')
-            ->groupBy('product_name_snapshot')
-            ->orderByDesc('total_qty')
-            ->take(5)
-            ->get();
-
-        $cashCount = $completedTransactions->where('payment_method', 'cash')->count();
-        $qrisCount = $completedTransactions->where('payment_method', 'qris')->count();
-
-        // Tren Penjualan Jam Operasional (10:00 - 20:00)
-        $hourlySales = [];
-        for ($h = 10; $h <= 20; $h += 2) {
-            $label = sprintf('%02d:00', $h);
-            $amount = $completedTransactions->filter(function ($t) use ($h) {
-                $hour = Carbon::parse($t->created_at)->hour;
-                return $hour >= $h && $hour < ($h + 2);
-            })->sum('total_amount');
-
-            $hourlySales[] = [
-                'hour' => $label,
-                'amount' => (int) $amount,
-            ];
-        }
-
-        // Riwayat Transaksi Ringkas pada Periode
-        $transactions = Transaction::whereBetween('created_at', [$start, $end])
-            ->latest('id')
+        $range = $this->storeTime->rangeFromRequest($request, 'month');
+        $query = $this->sales->within($this->sales->visibleTo($request->user()), $range);
+        $metrics = $this->sales->metrics($query);
+        $metrics['items_sold'] = $this->sales->itemsSold($query);
+        $topProducts = $this->sales->topProducts($query);
+        $hourlySales = $this->sales->hourly($query, $this->storeTime->timezone());
+        $transactions = (clone $query)->latest('transactions.id')
             ->paginate(15)
             ->withQueryString();
 
         return Inertia::render('Reports/Index', [
-            'metrics' => [
-                'omzet' => $omzet,
-                'count' => $trxCount,
-                'cash' => $cashSales,
-                'cash_count' => $cashCount,
-                'qris' => $qrisSales,
-                'qris_count' => $qrisCount,
-                'items_sold' => (int) $itemsSold,
-                'atv' => $atv,
-            ],
+            'metrics' => $metrics,
             'hourlySales' => $hourlySales,
             'topProducts' => $topProducts,
             'transactions' => $transactions,
             'filters' => [
                 'date_preset' => $datePreset,
-                'start_date' => $start->format('Y-m-d'),
-                'end_date' => $end->format('Y-m-d'),
+                'start_date' => $this->storeTime->localDate($range[0]),
+                'end_date' => $this->storeTime->localDate($range[1]->subSecond()),
             ],
         ]);
     }
@@ -96,15 +49,16 @@ class ReportController extends Controller
     public function exportCsv(Request $request): StreamedResponse
     {
         $datePreset = $request->input('date_preset', 'month');
-        [$start, $end] = $this->resolveDateRange($datePreset, $request->input('start_date'), $request->input('end_date'));
+        $range = $this->storeTime->rangeFromRequest($request, 'month');
+        [$start, $end] = $range;
 
-        $filename = 'laporan-penjualan-' . $start->format('Ymd') . '-' . $end->format('Ymd') . '.csv';
+        $filename = 'laporan-penjualan-'.$this->storeTime->localDate($start).'-'.$this->storeTime->localDate($end->subSecond()).'.csv';
 
-        return response()->streamDownload(function () use ($start, $end) {
+        return response()->streamDownload(function () use ($request, $start, $end) {
             $handle = fopen('php://output', 'w');
 
             // UTF-8 BOM untuk Microsoft Excel
-            fputs($handle, "\xEF\xBB\xBF");
+            fwrite($handle, "\xEF\xBB\xBF");
 
             // Header CSV
             fputcsv($handle, [
@@ -120,16 +74,16 @@ class ReportController extends Controller
                 'Status',
             ]);
 
-            Transaction::with(['items', 'user'])
-                ->whereBetween('created_at', [$start, $end])
-                ->chunk(100, function ($transactions) use ($handle) {
+            $this->sales->within($this->sales->visibleTo($request->user()), [$start, $end])
+                ->with(['items', 'user'])
+                ->chunkById(100, function ($transactions) use ($handle) {
                     foreach ($transactions as $t) {
-                        $itemsSummary = $t->items->map(fn ($i) => $i->product_name_snapshot . ' (' . $i->quantity . ')')->join(', ');
+                        $itemsSummary = $t->items->map(fn ($i) => $i->product_name_snapshot.' ('.$i->quantity.')')->join(', ');
 
                         fputcsv($handle, [
                             $t->invoice_number,
-                            $t->created_at->format('Y-m-d'),
-                            $t->created_at->format('H:i:s'),
+                            $t->created_at->setTimezone($this->storeTime->timezone())->format('Y-m-d'),
+                            $t->created_at->setTimezone($this->storeTime->timezone())->format('H:i:s'),
                             $t->user?->name ?? 'Kasir',
                             $itemsSummary,
                             $t->subtotal,
@@ -139,30 +93,11 @@ class ReportController extends Controller
                             strtoupper($t->status),
                         ]);
                     }
-                });
+                }, 'transactions.id', 'id');
 
             fclose($handle);
         }, $filename, [
             'Content-Type' => 'text/csv; charset=UTF-8',
         ]);
-    }
-
-    private function resolveDateRange(string $preset, ?string $start, ?string $end): array
-    {
-        $now = Carbon::now();
-
-        if ($preset === 'today') {
-            return [$now->copy()->startOfDay(), $now->copy()->endOfDay()];
-        } elseif ($preset === 'yesterday') {
-            return [$now->copy()->subDay()->startOfDay(), $now->copy()->subDay()->endOfDay()];
-        } elseif ($preset === '7days') {
-            return [$now->copy()->subDays(7)->startOfDay(), $now->copy()->endOfDay()];
-        } elseif ($preset === 'month') {
-            return [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()];
-        } elseif ($start && $end) {
-            return [Carbon::parse($start)->startOfDay(), Carbon::parse($end)->endOfDay()];
-        }
-
-        return [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()];
     }
 }

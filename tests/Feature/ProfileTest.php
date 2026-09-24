@@ -41,6 +41,7 @@ class ProfileTest extends TestCase
         $this->assertSame('Test User', $user->name);
         $this->assertSame('test@example.com', $user->email);
         $this->assertNull($user->email_verified_at);
+        $this->assertDatabaseHas('audit_logs', ['user_id' => $user->id, 'action' => 'UPDATE_PROFILE', 'entity_id' => $user->id]);
     }
 
     public function test_email_verification_status_is_unchanged_when_the_email_address_is_unchanged(): void
@@ -78,6 +79,17 @@ class ProfileTest extends TestCase
         $this->assertGuest();
         $this->assertNotNull($user->fresh()->deleted_at);
         $this->assertTrue($user->fresh()->trashed());
+        $this->assertDatabaseHas('audit_logs', ['user_id' => $user->id, 'action' => 'SOFT_DELETE_USER', 'entity_id' => $user->id]);
+    }
+
+    public function test_last_active_admin_cannot_delete_their_profile(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'status' => 'active']);
+
+        $this->actingAs($admin)->delete('/profile', ['password' => 'password'])->assertUnprocessable();
+
+        $this->assertAuthenticatedAs($admin);
+        $this->assertFalse($admin->fresh()->trashed());
     }
 
     public function test_correct_password_must_be_provided_to_delete_account(): void

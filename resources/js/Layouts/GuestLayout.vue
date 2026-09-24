@@ -1,5 +1,8 @@
 <script setup>
 import { UtensilsCrossed, Shield, Wifi } from 'lucide-vue-next';
+import { useNetworkStatus } from '@/Composables/useNetworkStatus';
+
+const { isOnline } = useNetworkStatus();
 </script>
 
 <template>
@@ -20,8 +23,8 @@ import { UtensilsCrossed, Shield, Wifi } from 'lucide-vue-next';
 
                 <!-- Server Online Status Pill -->
                 <div class="flex items-center gap-2 bg-surface-container-low px-3 py-1.5 rounded-full border border-border-subtle">
-                    <span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
-                    <span class="text-xs font-semibold text-secondary">POS Server Online</span>
+                    <span class="w-2 h-2 rounded-full" :class="isOnline ? 'bg-secondary animate-pulse' : 'bg-error-alert'"></span>
+                    <span class="text-xs font-semibold" :class="isOnline ? 'text-secondary' : 'text-error-alert'">{{ isOnline ? 'Perangkat Online' : 'Perangkat Offline' }}</span>
                 </div>
             </div>
         </header>

@@ -5,21 +5,29 @@ namespace App\Http\Controllers;
 use App\Models\Transaction;
 use App\Models\VoidLog;
 use App\Services\Audit\AuditLoggerService;
+use App\Services\POS\Money;
+use App\Services\POS\SalesQuery;
+use App\Services\POS\StoreTime;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class TransactionController extends Controller
 {
     public function __construct(
-        protected AuditLoggerService $auditLogger
+        protected AuditLoggerService $auditLogger,
+        protected SalesQuery $sales,
+        protected StoreTime $storeTime,
+        protected Money $money,
     ) {}
 
     public function index(Request $request): Response
     {
-        $query = Transaction::with(['items', 'user', 'voidLog.user'])
+        $baseQuery = $this->sales->visibleTo($request->user());
+        $query = (clone $baseQuery)->with(['items', 'user', 'voidLog.user'])
             ->latest('id');
 
         // 1. Filter Invoice Search
@@ -37,53 +45,38 @@ class TransactionController extends Controller
             $query->where('status', $status);
         }
 
-        // 4. Filter Rentang Tanggal
         $datePreset = $request->input('date_preset', 'all');
-        $now = Carbon::now();
-
-        if ($datePreset === 'today') {
-            $query->whereDate('created_at', Carbon::today());
-        } elseif ($datePreset === 'yesterday') {
-            $query->whereDate('created_at', Carbon::yesterday());
-        } elseif ($datePreset === '7days') {
-            $query->where('created_at', '>=', Carbon::today()->subDays(7));
-        } elseif ($datePreset === 'month') {
-            $query->whereMonth('created_at', $now->month)
-                ->whereYear('created_at', $now->year);
-        } elseif ($request->filled('start_date') && $request->filled('end_date')) {
-            $query->whereBetween('created_at', [
-                Carbon::parse($request->input('start_date'))->startOfDay(),
-                Carbon::parse($request->input('end_date'))->endOfDay(),
-            ]);
-        }
+        $this->sales->within($query, $this->storeTime->rangeFromRequest($request));
 
         // Pagination minimal 20 transaksi per halaman (PRD TRX-3)
         $transactions = $query->paginate(20)->withQueryString();
 
-        // Agregasi KPI Hari Ini (sesuai Stitch Header)
-        $todayCompleted = Transaction::whereDate('created_at', Carbon::today())
-            ->where('status', 'completed')
-            ->get();
-        $todayVoidCount = Transaction::whereDate('created_at', Carbon::today())
+        $todayQuery = $this->sales->within((clone $baseQuery), $this->storeTime->range('today'));
+        $todayMetrics = $this->sales->metrics($todayQuery);
+        $todayVoidCount = (clone $todayQuery)
             ->where('status', 'void')
             ->count();
-        $todayTotalCount = $todayCompleted->count() + $todayVoidCount;
+        $todayTotalCount = $todayMetrics['count'] + $todayVoidCount;
         $todayVoidPercentage = $todayTotalCount > 0 ? round(($todayVoidCount / $todayTotalCount) * 100, 1) : 0;
 
         $summary = [
-            'today_sales_count' => $todayCompleted->count(),
-            'today_sales_amount' => (int) $todayCompleted->sum('total_amount'),
+            'today_sales_count' => $todayMetrics['count'],
+            'today_sales_amount' => $todayMetrics['omzet'],
             'today_void_count' => $todayVoidCount,
             'today_void_percentage' => $todayVoidPercentage,
         ];
 
-        // Counter untuk filter chips
+        $countRow = (clone $baseQuery)->selectRaw("COUNT(*) AS aggregate_count,
+            COUNT(CASE WHEN transactions.payment_method = 'cash' THEN 1 END) AS cash_count,
+            COUNT(CASE WHEN transactions.payment_method = 'qris' THEN 1 END) AS qris_count,
+            COUNT(CASE WHEN transactions.status = 'completed' THEN 1 END) AS completed_count,
+            COUNT(CASE WHEN transactions.status = 'void' THEN 1 END) AS void_count")->first();
         $counts = [
-            'all' => Transaction::count(),
-            'cash' => Transaction::where('payment_method', 'cash')->count(),
-            'qris' => Transaction::where('payment_method', 'qris')->count(),
-            'completed' => Transaction::where('status', 'completed')->count(),
-            'void' => Transaction::where('status', 'void')->count(),
+            'all' => (int) $countRow->aggregate_count,
+            'cash' => (int) $countRow->cash_count,
+            'qris' => (int) $countRow->qris_count,
+            'completed' => (int) $countRow->completed_count,
+            'void' => (int) $countRow->void_count,
         ];
 
         return Inertia::render('Transactions/Index', [
@@ -112,31 +105,40 @@ class TransactionController extends Controller
         ]);
 
         $transaction = Transaction::findOrFail($id);
-
         if ($transaction->isVoid()) {
             return back()->with('error', 'Transaksi ini sudah dibatalkan (Void) sebelumnya.');
         }
 
-        $oldStatus = $transaction->status;
-        $transaction->status = 'void';
-        $transaction->save();
+        Gate::authorize('void', $transaction);
 
-        // Simpan alasan void, user pelaku, dan waktu void
-        VoidLog::create([
-            'transaction_id' => $transaction->id,
-            'user_id' => $request->user()->id,
-            'reason' => $validated['reason'],
-            'void_at' => now(),
-        ]);
+        DB::transaction(function () use ($transaction, $request, $validated): void {
+            $lockedTransaction = Transaction::lockForUpdate()->findOrFail($transaction->id);
 
-        // Audit Log
-        $this->auditLogger->log(
-            action: 'VOID_TRANSACTION',
-            entity: 'Transaction',
-            entityId: $transaction->id,
-            oldValues: ['status' => $oldStatus],
-            newValues: ['status' => 'void', 'reason' => $validated['reason']]
-        );
+            if ($lockedTransaction->isVoid()) {
+                abort(422, 'Transaksi ini sudah dibatalkan (Void) sebelumnya.');
+            }
+
+            $oldStatus = $lockedTransaction->status;
+            $lockedTransaction->update(['status' => 'void']);
+
+            if ($lockedTransaction->payment_method === 'cash') {
+                $shift = $lockedTransaction->shift()->lockForUpdate()->firstOrFail();
+                $totalMinor = $this->money->toMinor($lockedTransaction->total_amount);
+                $shift->update([
+                    'cash_sales' => $this->money->fromMinor($this->money->toMinor($shift->cash_sales) - $totalMinor),
+                    'expected_cash' => $this->money->fromMinor($this->money->toMinor($shift->expected_cash) - $totalMinor),
+                ]);
+            }
+
+            VoidLog::create([
+                'transaction_id' => $lockedTransaction->id,
+                'user_id' => $request->user()->id,
+                'reason' => $validated['reason'],
+                'void_at' => now(),
+            ]);
+
+            $this->auditLogger->log('VOID_TRANSACTION', 'Transaction', $lockedTransaction->id, ['status' => $oldStatus], ['status' => 'void', 'reason' => $validated['reason']]);
+        });
 
         return back()->with('success', "Transaksi #{$transaction->invoice_number} berhasil di-Void.");
     }

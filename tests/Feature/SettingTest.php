@@ -19,8 +19,9 @@ class SettingTest extends TestCase
             'store_name' => 'Kedai Kopi Bahagia',
             'store_address' => 'Jl. Merdeka No. 45',
             'store_phone' => '081299998888',
-            'store_logo' => 'https://example.com/logo.png',
+            'currency' => 'IDR',
             'invoice_prefix' => 'KPB',
+            'currency' => 'IDR',
             'timezone' => 'Asia/Jakarta',
             'tax_enabled' => true,
             'tax_percentage' => 11.0,
@@ -45,6 +46,7 @@ class SettingTest extends TestCase
         $response = $this->actingAs($admin)->put('/settings', [
             'store_name' => 'Kedai Kopi Bahagia',
             'invoice_prefix' => 'KPB',
+            'currency' => 'IDR',
             'timezone' => 'Asia/Jakarta',
             'tax_enabled' => true,
             'tax_percentage' => 10.0,

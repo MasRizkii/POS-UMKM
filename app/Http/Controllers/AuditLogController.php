@@ -4,13 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
 use App\Models\User;
+use App\Services\POS\StoreTime;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class AuditLogController extends Controller
 {
+    public function __construct(protected StoreTime $storeTime) {}
+
     public function index(Request $request): Response
     {
         $query = AuditLog::with('user:id,name,email,role')->latest('id');
@@ -33,24 +35,10 @@ class AuditLogController extends Controller
             $query->where('action', $action);
         }
 
-        // 4. Filter Rentang Waktu
         $datePreset = $request->input('date_preset', 'all');
-        $now = Carbon::now();
-
-        if ($datePreset === 'today') {
-            $query->whereDate('created_at', Carbon::today());
-        } elseif ($datePreset === 'yesterday') {
-            $query->whereDate('created_at', Carbon::yesterday());
-        } elseif ($datePreset === '7days') {
-            $query->where('created_at', '>=', Carbon::today()->subDays(7));
-        } elseif ($datePreset === 'month') {
-            $query->whereMonth('created_at', $now->month)
-                ->whereYear('created_at', $now->year);
-        } elseif ($request->filled('start_date') && $request->filled('end_date')) {
-            $query->whereBetween('created_at', [
-                Carbon::parse($request->input('start_date'))->startOfDay(),
-                Carbon::parse($request->input('end_date'))->endOfDay(),
-            ]);
+        $range = $this->storeTime->rangeFromRequest($request);
+        if ($range !== null) {
+            $query->where('created_at', '>=', $range[0])->where('created_at', '<', $range[1]);
         }
 
         // Pagination 20 item per halaman (PRD AUDIT-2)

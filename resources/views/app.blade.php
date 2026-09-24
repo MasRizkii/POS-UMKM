@@ -3,6 +3,11 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#EF5A35">
+        @if (! \Illuminate\Support\Facades\Vite::isRunningHot())
+            <link rel="manifest" href="/build/manifest.webmanifest">
+        @endif
+        <link rel="apple-touch-icon" href="/icons/pos-192.png">
 
         <title inertia>{{ config('app.name', 'Laravel') }}</title>
 

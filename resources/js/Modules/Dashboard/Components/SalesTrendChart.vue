@@ -2,6 +2,9 @@
 import { onMounted, ref } from 'vue';
 import { Chart, registerables } from 'chart.js';
 import { Calendar } from 'lucide-vue-next';
+import { useCurrency } from '@/Composables/useCurrency';
+
+const { formatCurrency, currencySymbol } = useCurrency();
 
 Chart.register(...registerables);
 
@@ -42,7 +45,7 @@ onMounted(() => {
             labels: props.hourlyData.map(d => d.time),
             datasets: [
                 {
-                    label: 'Penjualan (Rp)',
+                    label: `Penjualan (${currencySymbol.value})`,
                     data: props.hourlyData.map(d => d.total),
                     borderColor: '#EF5A35',
                     borderWidth: 3,
@@ -68,7 +71,7 @@ onMounted(() => {
                     cornerRadius: 12,
                     callbacks: {
                         label: function (context) {
-                            return ' Rp ' + Number(context.raw).toLocaleString('id-ID');
+                            return formatCurrency(context.raw);
                         },
                     },
                 },
@@ -89,9 +92,7 @@ onMounted(() => {
                         font: { size: 10 },
                         color: '#9CA3AF',
                         callback: function (val) {
-                            if (val >= 1000000) return 'Rp ' + (val / 1000000) + 'jt';
-                            if (val >= 1000) return 'Rp ' + (val / 1000) + 'k';
-                            return 'Rp ' + val;
+                            return formatCurrency(val);
                         },
                     },
                 },
@@ -112,7 +113,7 @@ onMounted(() => {
                         Live Sync
                     </span>
                 </div>
-                <span class="text-xs text-text-muted mt-0.5">Rentang jam kerja operasional: 10:00 - 21:00 WIB</span>
+                <span class="text-xs text-text-muted mt-0.5">Tren penjualan per jam mengikuti zona waktu toko</span>
             </div>
 
             <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border-subtle bg-surface text-xs font-semibold text-text-primary shadow-xs">

@@ -53,10 +53,12 @@ const filteredProducts = computed(() => {
                     <!-- Image Thumbnail -->
                     <div class="w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-white border border-border-subtle p-0.5 flex items-center justify-center">
                         <img
+                            v-if="product.image_url"
                             :src="product.image_url"
                             :alt="product.name"
                             class="w-full h-full object-cover rounded-md"
                         />
+                        <span v-else class="text-sm font-black text-primary">{{ product.name?.charAt(0) }}</span>
                     </div>
 
                     <!-- Details -->
@@ -73,10 +75,10 @@ const filteredProducts = computed(() => {
                 <!-- Sales Info -->
                 <div class="flex flex-col text-right shrink-0">
                     <span class="text-xs font-bold" :class="index === 0 ? 'text-primary' : 'text-text-primary'">
-                        {{ product.sold_count || (24 - index * 5) }}x terjual
+                        {{ product.sold_count ?? 0 }}x terjual
                     </span>
                     <span class="text-[11px] text-text-muted font-medium">
-                        {{ formatRupiah(product.total_sales || (product.price * (24 - index * 5))) }}
+                        {{ formatRupiah(product.total_sales ?? 0) }}
                     </span>
                 </div>
             </div>

@@ -13,6 +13,7 @@ class Shift extends Model
 
     protected $fillable = [
         'user_id',
+        'active_user_id',
         'opening_cash',
         'cash_sales',
         'expected_cash',
@@ -23,6 +24,13 @@ class Shift extends Model
         'closed_at',
         'notes',
     ];
+
+    protected static function booted(): void
+    {
+        static::saving(function (Shift $shift): void {
+            $shift->active_user_id = $shift->status === 'open' ? $shift->user_id : null;
+        });
+    }
 
     protected function casts(): array
     {
@@ -39,7 +47,7 @@ class Shift extends Model
 
     public function user(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class)->withTrashed();
     }
 
     public function transactions(): HasMany

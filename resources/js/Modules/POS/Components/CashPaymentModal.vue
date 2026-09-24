@@ -5,7 +5,7 @@ import { useCurrency } from '@/Composables/useCurrency';
 import { Banknote, X, CheckCircle } from 'lucide-vue-next';
 
 const cart = useCartStore();
-const { formatRupiah } = useCurrency();
+const { formatRupiah, currencySymbol } = useCurrency();
 
 const props = defineProps({
     show: {
@@ -78,7 +78,7 @@ const addDenomination = (val) => {
             <div class="flex flex-col gap-1.5">
                 <label class="text-xs font-bold text-text-primary">Nominal Uang Diterima:</label>
                 <div class="relative">
-                    <span class="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-text-muted text-sm">Rp</span>
+                    <span class="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-text-muted text-sm">{{ currencySymbol }}</span>
                     <input
                         type="number"
                         v-model.number="cashInput"

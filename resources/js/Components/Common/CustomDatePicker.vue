@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, X } from 'lucide-vue-next';
+import { useDateTime } from '@/Composables/useDateTime';
 
 const props = defineProps({
     modelValue: {
@@ -18,14 +19,28 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['update:modelValue']);
+const { timezone } = useDateTime();
+
+const storeTodayYMD = () => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone.value,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+};
+
+const localDateFromYMD = (ymd) => new Date(`${ymd}T00:00:00`);
 
 const isOpen = ref(false);
 const containerRef = ref(null);
 
 // Tanggal yang sedang aktif dilihat di kalender
-const viewDate = ref(props.modelValue ? new Date(props.modelValue) : new Date());
+const viewDate = ref(localDateFromYMD(props.modelValue || storeTodayYMD()));
 if (isNaN(viewDate.value.getTime())) {
-    viewDate.value = new Date();
+    viewDate.value = localDateFromYMD(storeTodayYMD());
 }
 
 const currentYear = computed(() => viewDate.value.getFullYear());
@@ -70,7 +85,7 @@ const calendarDays = computed(() => {
     }
 
     // Hari bulan saat ini
-    const todayYMD = formatDateYMD(new Date());
+    const todayYMD = storeTodayYMD();
     for (let d = 1; d <= lastDate; d++) {
         const dateObj = new Date(year, month, d);
         const ymd = formatDateYMD(dateObj);
@@ -120,8 +135,8 @@ const selectDate = (dayObj) => {
 };
 
 const setToday = () => {
-    const todayStr = formatDateYMD(new Date());
-    viewDate.value = new Date();
+    const todayStr = storeTodayYMD();
+    viewDate.value = localDateFromYMD(todayStr);
     emit('update:modelValue', todayStr);
     isOpen.value = false;
 };

@@ -61,11 +61,13 @@ class ProductController extends Controller
             'category_id' => ['required', 'exists:categories,id'],
             'name' => ['required', 'string', 'max:255'],
             'price' => ['required', 'numeric', 'min:0'],
-            'image_url' => ['nullable', 'string', 'max:2000'],
+            'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'description' => ['nullable', 'string', 'max:1000'],
             'status' => ['required', 'in:tersedia,tidak_tersedia'],
         ]);
 
+        $validated['image_url'] = $request->hasFile('image') ? '/storage/'.$request->file('image')->store('products', 'public') : null;
+        unset($validated['image']);
         $product = Product::create($validated);
 
         $this->auditLogger->log(
@@ -86,12 +88,16 @@ class ProductController extends Controller
             'category_id' => ['required', 'exists:categories,id'],
             'name' => ['required', 'string', 'max:255'],
             'price' => ['required', 'numeric', 'min:0'],
-            'image_url' => ['nullable', 'string', 'max:2000'],
+            'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'description' => ['nullable', 'string', 'max:1000'],
             'status' => ['required', 'in:tersedia,tidak_tersedia'],
         ]);
 
         $oldValues = $product->only(['name', 'price', 'status', 'category_id']);
+        if ($request->hasFile('image')) {
+            $validated['image_url'] = '/storage/'.$request->file('image')->store('products', 'public');
+        }
+        unset($validated['image']);
         $product->update($validated);
 
         // Audit Log khusus perubahan harga (PRD AUDIT-1)
@@ -128,7 +134,7 @@ class ProductController extends Controller
     public function destroy($id): RedirectResponse
     {
         $product = Product::findOrFail($id);
-        
+
         // Soft delete sesuai PRD PROD-6 & PROD-8
         $product->delete();
 

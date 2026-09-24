@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
+use App\Models\AuditLog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -34,6 +35,7 @@ class AuthenticatedSessionController extends Controller
         $request->session()->regenerate();
 
         $user = $request->user();
+        AuditLog::create(['user_id' => $user?->id, 'action' => 'LOGIN_SUCCESS', 'entity' => 'User', 'entity_id' => $user?->id, 'new_values' => ['ip' => $request->ip()], 'created_at' => now()]);
         if ($user && $user->isCashier()) {
             return redirect()->intended(route('pos.index'));
         }

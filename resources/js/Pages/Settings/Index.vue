@@ -1,6 +1,7 @@
 <script setup>
 import { Head, useForm, usePage } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { useImagePreview } from '@/Composables/useImagePreview';
+import { useCurrency } from '@/Composables/useCurrency';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { 
     Settings, 
@@ -27,13 +28,15 @@ const props = defineProps({
 });
 
 const page = usePage();
+const { currency } = useCurrency();
 
 const form = useForm({
     store_name: props.setting.store_name || '',
     store_address: props.setting.store_address || '',
     store_phone: props.setting.store_phone || '',
-    store_logo: props.setting.store_logo || '',
+    store_logo: null,
     invoice_prefix: props.setting.invoice_prefix || 'INV',
+    currency: props.setting.currency || currency.value,
     timezone: props.setting.timezone || 'Asia/Jakarta',
     tax_enabled: Boolean(props.setting.tax_enabled),
     tax_percentage: Number(props.setting.tax_percentage) || 0,
@@ -43,9 +46,17 @@ const form = useForm({
     qris_enabled: Boolean(props.setting.qris_enabled),
 });
 
+const logoPreview = useImagePreview(() => form.store_logo, () => props.setting.store_logo);
+const selectLogo = (event) => {
+    const file = event.target.files[0] || null;
+    form.store_logo = file;
+};
+
 const submit = () => {
-    form.put(route('settings.update'), {
+    form.transform((data) => ({ ...data, _method: 'put' })).post(route('settings.update'), {
+        forceFormData: true,
         preserveScroll: true,
+        onSuccess: () => form.reset('store_logo'),
     });
 };
 </script>
@@ -138,18 +149,21 @@ const submit = () => {
                             </div>
                         </div>
 
-                        <!-- URL Logo -->
+                        <!-- Logo -->
                         <div class="flex flex-col gap-1">
-                            <label class="text-xs font-bold text-text-primary">URL Logo Toko (Opsional)</label>
+                            <label class="text-xs font-bold text-text-primary">Logo Toko (Opsional)</label>
                             <div class="relative">
                                 <input
-                                    v-model="form.store_logo"
-                                    type="url"
-                                    placeholder="https://domain.com/logo.png"
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    @change="selectLogo"
                                     class="w-full h-11 pl-10 pr-3.5 rounded-xl bg-surface-container-low border border-border-subtle text-xs text-text-primary font-medium focus:ring-2 focus:ring-primary focus:bg-white outline-none"
                                 />
                                 <ImageIcon class="w-4 h-4 text-text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
                             </div>
+                            <img v-if="logoPreview" :src="logoPreview" alt="Preview logo" class="w-16 h-16 rounded-xl object-cover border border-border-subtle" />
+                            <p class="text-[10px] text-text-muted">JPG, PNG, atau WEBP. Maksimal 5 MB.</p>
+                            <p v-if="form.errors.store_logo" class="text-xs text-error-alert">{{ form.errors.store_logo }}</p>
                         </div>
                     </div>
                 </div>
@@ -183,6 +197,10 @@ const submit = () => {
                         </div>
 
                         <!-- Zona Waktu -->
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs font-bold text-text-primary">Currency</label>
+                            <select v-model="form.currency" class="w-full h-11 px-3.5 rounded-xl bg-surface-container-low border border-border-subtle text-xs font-bold text-text-primary"><option value="IDR">IDR - Rupiah</option></select>
+                        </div>
                         <div class="flex flex-col gap-1">
                             <label class="text-xs font-bold text-text-primary">Zona Waktu Operasional *</label>
                             <div class="relative">

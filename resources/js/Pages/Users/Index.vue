@@ -20,7 +20,7 @@ import {
     Ban
 } from 'lucide-vue-next';
 
-const { formatDate, formatTime } = useDateTime();
+const { formatDate, formatTime, timeZoneLabel } = useDateTime();
 const page = usePage();
 const currentUser = computed(() => page.props.auth?.user || {});
 
@@ -279,7 +279,7 @@ const confirmDelete = () => {
                                 <td class="py-4 px-6 whitespace-nowrap text-text-muted">
                                     <div class="flex flex-col">
                                         <span class="text-xs text-on-surface">{{ formatDate(user.created_at) }}</span>
-                                        <span class="text-[10px]">{{ formatTime(user.created_at) }} WIB</span>
+                                        <span class="text-[10px]">{{ formatTime(user.created_at) }} {{ timeZoneLabel }}</span>
                                     </div>
                                 </td>
 

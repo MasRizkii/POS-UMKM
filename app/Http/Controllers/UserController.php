@@ -3,9 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\ActiveAdminGuard;
 use App\Services\Audit\AuditLoggerService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -14,7 +16,7 @@ use Inertia\Response;
 class UserController extends Controller
 {
     public function __construct(
-        protected AuditLoggerService $auditLogger
+        protected AuditLoggerService $auditLogger, protected ActiveAdminGuard $activeAdminGuard
     ) {}
 
     public function index(Request $request): Response
@@ -94,26 +96,30 @@ class UserController extends Controller
             'status' => ['required', 'in:active,inactive'],
         ]);
 
-        $oldValues = $user->only(['name', 'email', 'role', 'status']);
+        DB::transaction(function () use ($user, $validated): void {
+            if ($user->isAdmin() && $user->status === 'active' && ($validated['role'] !== 'admin' || $validated['status'] !== 'active')) {
+                $this->activeAdminGuard->ensureCanDeactivate($user);
+            }
 
-        $user->name = $validated['name'];
-        $user->email = $validated['email'];
-        $user->role = $validated['role'];
-        $user->status = $validated['status'];
+            $oldValues = $user->only(['name', 'email', 'role', 'status']);
+            $user->name = $validated['name'];
+            $user->email = $validated['email'];
+            $user->role = $validated['role'];
+            $user->status = $validated['status'];
 
-        if (! empty($validated['password'])) {
-            $user->password = Hash::make($validated['password']);
-        }
+            if (! empty($validated['password'])) {
+                $user->password = Hash::make($validated['password']);
+            }
 
-        $user->save();
-
-        $this->auditLogger->log(
-            action: 'UPDATE_USER',
-            entity: 'User',
-            entityId: $user->id,
-            oldValues: $oldValues,
-            newValues: $user->only(['name', 'email', 'role', 'status'])
-        );
+            $user->save();
+            $this->auditLogger->log(
+                action: 'UPDATE_USER',
+                entity: 'User',
+                entityId: $user->id,
+                oldValues: $oldValues,
+                newValues: $user->only(['name', 'email', 'role', 'status'])
+            );
+        });
 
         return back()->with('success', "Data pengguna {$user->name} berhasil diperbarui.");
     }
@@ -127,27 +133,20 @@ class UserController extends Controller
             return back()->with('error', 'Anda tidak dapat menonaktifkan atau menghapus akun Anda sendiri.');
         }
 
-        // Safeguard 2: Memastikan tidak menghapus admin terakhir yang aktif
-        if ($user->isAdmin()) {
-            $activeAdminCount = User::where('role', 'admin')->where('status', 'active')->count();
-            if ($activeAdminCount <= 1) {
-                return back()->with('error', 'Tidak dapat menghapus admin utama. Sistem wajib memiliki minimal satu admin aktif.');
-            }
-        }
-
-        // Soft Delete (PRD USER-4 & USER-5)
-        $user->delete();
-
-        $this->auditLogger->log(
-            action: 'SOFT_DELETE_USER',
-            entity: 'User',
-            entityId: $user->id,
-            oldValues: [
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->role,
-            ]
-        );
+        DB::transaction(function () use ($user): void {
+            $this->activeAdminGuard->ensureCanDeactivate($user);
+            $user->delete();
+            $this->auditLogger->log(
+                action: 'SOFT_DELETE_USER',
+                entity: 'User',
+                entityId: $user->id,
+                oldValues: [
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $user->role,
+                ]
+            );
+        });
 
         return back()->with('success', "Pengguna {$user->name} berhasil dinonaktifkan (Soft Delete). Histori transaksi kasir tetap aman.");
     }

@@ -20,7 +20,7 @@ import {
 } from 'lucide-vue-next';
 
 const { formatRupiah } = useCurrency();
-const { formatDate, formatTime } = useDateTime();
+const { formatDate, formatTime, timeZoneLabel } = useDateTime();
 
 const props = defineProps({
     metrics: {
@@ -380,7 +380,7 @@ const areaPath = computed(() => {
                             </div>
                             <div class="flex items-center gap-1.5 bg-background px-3 py-1 rounded-lg border border-border-subtle self-start sm:self-auto">
                                 <span class="w-2.5 h-2.5 rounded-full bg-primary"></span>
-                                <span class="text-xs font-semibold text-on-surface">Omzet / Jam (WIB)</span>
+                                <span class="text-xs font-semibold text-on-surface">Omzet / Jam ({{ timeZoneLabel }})</span>
                             </div>
                         </div>
 
@@ -493,14 +493,14 @@ const areaPath = computed(() => {
                                 v-if="activeHoverIndex !== null && chartPoints[activeHoverIndex]"
                                 class="absolute top-2 left-1/2 -translate-x-1/2 bg-black/85 text-white px-3 py-1.5 rounded-xl shadow-lg text-xs font-semibold flex items-center gap-2 pointer-events-none z-10 animate-in fade-in"
                             >
-                                <span class="text-amber-300 font-mono">{{ chartPoints[activeHoverIndex].hour }} WIB:</span>
+                                <span class="text-amber-300 font-mono">{{ chartPoints[activeHoverIndex].hour }} {{ timeZoneLabel }}:</span>
                                 <span class="font-bold text-white">{{ formatRupiah(chartPoints[activeHoverIndex].amount) }}</span>
                             </div>
                         </div>
                     </div>
 
                     <div class="flex items-center justify-between pt-3 text-xs text-text-muted border-t border-border-subtle/50 mt-2">
-                        <span>Jam buka operasional: 10:00 - 20:00 WIB</span>
+                        <span>Jam buka operasional: 10:00 - 20:00 {{ timeZoneLabel }}</span>
                         <span class="font-semibold text-on-surface">Grafik garis tren penjualan</span>
                     </div>
                 </div>
@@ -691,7 +691,7 @@ const areaPath = computed(() => {
                             >
                                 <td class="px-4 py-3 font-bold text-primary">#{{ trx.invoice_number }}</td>
                                 <td class="px-4 py-3 whitespace-nowrap text-text-muted">
-                                    {{ formatDate(trx.created_at) }}, {{ formatTime(trx.created_at) }} WIB
+                                    {{ formatDate(trx.created_at) }}, {{ formatTime(trx.created_at) }} {{ timeZoneLabel }}
                                 </td>
                                 <td class="px-4 py-3 whitespace-nowrap">
                                     <span
@@ -750,7 +750,7 @@ const areaPath = computed(() => {
                             <span class="font-bold text-xs text-on-surface">{{ formatRupiah(trx.total_amount) }}</span>
                         </div>
                         <div class="flex items-center justify-between text-[11px] text-text-muted">
-                            <span>{{ formatDate(trx.created_at) }}, {{ formatTime(trx.created_at) }} WIB</span>
+                            <span>{{ formatDate(trx.created_at) }}, {{ formatTime(trx.created_at) }} {{ timeZoneLabel }}</span>
                             <span class="font-semibold uppercase">{{ trx.payment_method }}</span>
                         </div>
                     </div>

@@ -21,7 +21,7 @@ import {
 } from 'lucide-vue-next';
 
 const { formatRupiah } = useCurrency();
-const { formatDate, formatTime } = useDateTime();
+const { formatDate, formatTime, timeZoneLabel } = useDateTime();
 
 const props = defineProps({
     transactions: {
@@ -360,7 +360,7 @@ const exportCsv = () => {
                                 <!-- Waktu & Tanggal (2 lines) -->
                                 <td class="px-4 py-3 whitespace-nowrap">
                                     <span class="text-on-surface font-semibold text-xs block">{{ formatDate(trx.created_at) }}</span>
-                                    <span class="text-text-muted text-[11px] block">{{ formatTime(trx.created_at) }} WIB</span>
+                                    <span class="text-text-muted text-[11px] block">{{ formatTime(trx.created_at) }} {{ timeZoneLabel }}</span>
                                 </td>
 
                                 <!-- Kasir -->
@@ -472,7 +472,7 @@ const exportCsv = () => {
                         </div>
 
                         <div class="text-xs text-text-muted">
-                            {{ formatDate(trx.created_at) }}, {{ formatTime(trx.created_at) }} WIB • Oleh: {{ trx.user?.name || 'Kasir' }}
+                            {{ formatDate(trx.created_at) }}, {{ formatTime(trx.created_at) }} {{ timeZoneLabel }} • Oleh: {{ trx.user?.name || 'Kasir' }}
                         </div>
 
                         <div class="text-xs text-on-surface line-clamp-2">

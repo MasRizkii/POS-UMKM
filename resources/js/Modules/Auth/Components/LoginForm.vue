@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useForm } from '@inertiajs/vue3';
+import { useDateTime } from '@/Composables/useDateTime';
 import { 
     Lock, 
     User as UserIcon, 
@@ -20,15 +21,12 @@ const form = useForm({
 
 const showPassword = ref(false);
 const currentTime = ref('');
+const { formatTime, timeZoneLabel } = useDateTime();
 
 let timer = null;
 
 const updateClock = () => {
-    const now = new Date();
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-    currentTime.value = `${hours}:${minutes}:${seconds} WIB`;
+    currentTime.value = `${formatTime(new Date(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })} ${timeZoneLabel.value}`;
 };
 
 onMounted(() => {

@@ -18,15 +18,17 @@ const { formatRupiah } = useCurrency();
 const props = defineProps({
     activeCashier: {
         type: Object,
-        default: () => ({ name: 'Sarah Jenkins', shiftName: 'Shift 1' }),
+        default: () => ({ name: 'Kasir', shiftName: 'Belum Aktif' }),
     },
+    setting: { type: Object, default: () => ({ tax_enabled: false, service_charge_enabled: false, cash_enabled: true, qris_enabled: true }) },
 });
 
 defineEmits(['openPaymentModal']);
 
-// Pajak dihapus: Total pembayaran murni dari subtotal
+const taxAmount = computed(() => props.setting.tax_enabled ? Math.round(cart.subtotal * Number(props.setting.tax_percentage) * 100) / 10000 : 0);
+const serviceChargeAmount = computed(() => props.setting.service_charge_enabled ? Math.round(cart.subtotal * Number(props.setting.service_charge_percentage) * 100) / 10000 : 0);
 const totalPayable = computed(() => {
-    return cart.subtotal;
+    return cart.subtotal + taxAmount.value + serviceChargeAmount.value;
 });
 </script>
 
@@ -43,10 +45,10 @@ const totalPayable = computed(() => {
                 </div>
                 <div class="flex flex-col">
                     <span class="text-xs sm:text-sm font-bold text-text-primary leading-tight">
-                        {{ activeCashier.name || 'Sarah Jenkins' }}
+                        {{ activeCashier.name || 'Kasir' }}
                     </span>
                     <span class="text-[11px] font-medium text-text-muted">
-                        Kasir • {{ activeCashier.shiftName || 'Shift Siang' }}
+                        Kasir • {{ activeCashier.shiftName || 'Belum Aktif' }}
                     </span>
                 </div>
             </div>
@@ -148,6 +150,8 @@ const totalPayable = computed(() => {
                 <span class="text-text-muted">Sub Total</span>
                 <span class="font-bold text-text-primary">{{ formatRupiah(cart.subtotal) }}</span>
             </div>
+            <div v-if="taxAmount" class="flex items-center justify-between text-xs"><span class="text-text-muted">Pajak</span><span class="font-bold">{{ formatRupiah(taxAmount) }}</span></div>
+            <div v-if="serviceChargeAmount" class="flex items-center justify-between text-xs"><span class="text-text-muted">Service charge</span><span class="font-bold">{{ formatRupiah(serviceChargeAmount) }}</span></div>
             <div class="my-0.5 h-[1px] bg-border-subtle w-full"></div>
             <div class="flex items-center justify-between">
                 <span class="text-sm font-bold text-text-primary">Total Pembayaran</span>
@@ -163,6 +167,7 @@ const totalPayable = computed(() => {
                 <button
                     type="button"
                     @click="cart.paymentMethod = 'qris'"
+                    :disabled="!setting.qris_enabled"
                     class="flex flex-col items-center justify-center py-2.5 px-3 rounded-xl transition-all cursor-pointer border"
                     :class="[
                         cart.paymentMethod === 'qris'
@@ -178,6 +183,7 @@ const totalPayable = computed(() => {
                 <button
                     type="button"
                     @click="cart.paymentMethod = 'cash'"
+                    :disabled="!setting.cash_enabled"
                     class="flex flex-col items-center justify-center py-2.5 px-3 rounded-xl transition-all cursor-pointer border"
                     :class="[
                         cart.paymentMethod === 'cash'

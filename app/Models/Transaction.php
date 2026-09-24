@@ -14,6 +14,7 @@ class Transaction extends Model
 
     protected $fillable = [
         'invoice_number',
+        'idempotency_key',
         'user_id',
         'shift_id',
         'subtotal',

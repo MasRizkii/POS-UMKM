@@ -3,16 +3,24 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ProfileUpdateRequest;
+use App\Services\ActiveAdminGuard;
+use App\Services\Audit\AuditLoggerService;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redirect;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class ProfileController extends Controller
 {
+    public function __construct(
+        protected AuditLoggerService $auditLogger,
+        protected ActiveAdminGuard $activeAdminGuard,
+    ) {}
+
     /**
      * Display the user's profile form.
      */
@@ -29,6 +37,7 @@ class ProfileController extends Controller
      */
     public function update(ProfileUpdateRequest $request): RedirectResponse
     {
+        $oldValues = $request->user()->only(['name', 'email']);
         $request->user()->fill($request->validated());
 
         if ($request->user()->isDirty('email')) {
@@ -36,6 +45,13 @@ class ProfileController extends Controller
         }
 
         $request->user()->save();
+        $this->auditLogger->log(
+            'UPDATE_PROFILE',
+            'User',
+            $request->user()->id,
+            $oldValues,
+            $request->user()->only(['name', 'email']),
+        );
 
         return Redirect::route('profile.edit');
     }
@@ -50,11 +66,14 @@ class ProfileController extends Controller
         ]);
 
         $user = $request->user();
+        DB::transaction(function () use ($user): void {
+            $this->activeAdminGuard->ensureCanDeactivate($user);
+            $oldValues = $user->only(['name', 'email', 'role', 'status']);
+            $user->delete();
+            $this->auditLogger->log('SOFT_DELETE_USER', 'User', $user->id, $oldValues);
+        });
 
         Auth::logout();
-
-        $user->delete();
-
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 

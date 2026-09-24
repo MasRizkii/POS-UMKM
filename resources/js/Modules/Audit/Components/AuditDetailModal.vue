@@ -2,7 +2,7 @@
 import { X, History, User, Calendar, Database, ArrowRight } from 'lucide-vue-next';
 import { useDateTime } from '@/Composables/useDateTime';
 
-const { formatDateTime } = useDateTime();
+const { formatDateTime, timeZoneLabel } = useDateTime();
 
 defineProps({
     show: {
@@ -86,7 +86,7 @@ const getActionColor = (action) => {
                     <div class="flex flex-col">
                         <span class="text-[10px] font-bold text-text-muted uppercase">Waktu Aktivitas</span>
                         <span class="text-xs font-bold text-text-primary">{{ formatDateTime(audit.created_at) }}</span>
-                        <span class="text-[10px] text-text-muted">Waktu Lokal (WIB)</span>
+                        <span class="text-[10px] text-text-muted">Waktu Lokal ({{ timeZoneLabel }})</span>
                     </div>
                 </div>
 

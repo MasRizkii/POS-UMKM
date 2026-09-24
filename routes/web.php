@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\AuditLogController;
-use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\POSController;
@@ -9,6 +8,7 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SettingController;
+use App\Http\Controllers\ShiftController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -20,6 +20,7 @@ Route::get('/', function () {
             ? redirect()->route('pos.index')
             : redirect()->route('dashboard');
     }
+
     return redirect()->route('login');
 });
 
@@ -32,9 +33,15 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/pos', [POSController::class, 'index'])->name('pos.index');
     Route::post('/pos/checkout', [POSController::class, 'checkout'])->name('pos.checkout');
 
+    Route::get('/shifts', [ShiftController::class, 'index'])->name('shifts.index');
+    Route::post('/shifts/open', [ShiftController::class, 'open'])->name('shifts.open');
+    Route::post('/shifts/{shift}/close', [ShiftController::class, 'close'])->name('shifts.close');
+
     // 3. Transaksi & Void (Kasir & Admin)
     Route::get('/transactions', [TransactionController::class, 'index'])->name('transactions.index');
-    Route::post('/transactions/{id}/void', [TransactionController::class, 'void'])->name('transactions.void');
+    Route::post('/transactions/{id}/void', [TransactionController::class, 'void'])
+        ->middleware('role:admin')
+        ->name('transactions.void');
 
     // 4. Modul Khusus Administrator (PRD: otorisasi server-side wajib ditegakkan)
     Route::middleware(['role:admin'])->group(function () {

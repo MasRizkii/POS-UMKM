@@ -58,6 +58,7 @@ class POSTest extends TestCase
             ],
             'payment_method' => 'cash',
             'amount_paid' => 20000,
+            'idempotency_key' => 'b088d85e-940d-4c83-a025-000000000001',
         ];
 
         $response = $this->actingAs($cashier)->postJson('/pos/checkout', $payload);
@@ -108,7 +109,16 @@ class POSTest extends TestCase
             ],
             'payment_method' => 'cash',
             'amount_paid' => 10000,
+            'idempotency_key' => 'b088d85e-940d-4c83-a025-000000000002',
         ];
+
+        Shift::create([
+            'user_id' => $cashier->id,
+            'opening_cash' => 100000,
+            'cash_sales' => 0,
+            'expected_cash' => 100000,
+            'status' => 'open',
+        ]);
 
         $response = $this->actingAs($cashier)->postJson('/pos/checkout', $payload);
 

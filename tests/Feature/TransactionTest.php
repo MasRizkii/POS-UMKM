@@ -23,6 +23,23 @@ class TransactionTest extends TestCase
         ]);
     }
 
+    private function createTransaction(User $user, Shift $shift, array $attributes = []): Transaction
+    {
+        return Transaction::create(array_merge([
+            'invoice_number' => 'INV-'.uniqid(),
+            'user_id' => $user->id,
+            'shift_id' => $shift->id,
+            'subtotal' => 10000,
+            'tax_amount' => 0,
+            'service_charge_amount' => 0,
+            'total_amount' => 10000,
+            'payment_method' => 'cash',
+            'amount_paid' => 10000,
+            'change_due' => 0,
+            'status' => 'completed',
+        ], $attributes));
+    }
+
     public function test_can_list_transactions_with_pagination(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
@@ -76,6 +93,30 @@ class TransactionTest extends TestCase
             'user_id' => $admin->id,
             'reason' => 'Pelanggan salah pesan menu dan minta refund',
         ]);
+    }
+
+    public function test_cashier_cannot_void_transaction(): void
+    {
+        $cashier = User::factory()->create(['role' => 'cashier']);
+        $shift = $this->createShift($cashier);
+        $transaction = $this->createTransaction($cashier, $shift);
+
+        $this->actingAs($cashier)->post("/transactions/{$transaction->id}/void", ['reason' => 'Tidak boleh'])->assertForbidden();
+        $this->assertDatabaseHas('transactions', ['id' => $transaction->id, 'status' => 'completed']);
+        $this->assertDatabaseCount('void_logs', 0);
+    }
+
+    public function test_void_cash_reverses_shift_totals_but_qris_does_not(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $shift = Shift::create(['user_id' => $admin->id, 'opening_cash' => 100000, 'cash_sales' => 22000, 'expected_cash' => 122000, 'status' => 'open']);
+        $cash = $this->createTransaction($admin, $shift, ['total_amount' => 22000]);
+        $this->actingAs($admin)->post("/transactions/{$cash->id}/void", ['reason' => 'Refund cash'])->assertSessionHas('success');
+        $this->assertDatabaseHas('shifts', ['id' => $shift->id, 'cash_sales' => 0, 'expected_cash' => 100000]);
+
+        $qris = $this->createTransaction($admin, $shift, ['total_amount' => 15000, 'payment_method' => 'qris']);
+        $this->actingAs($admin)->post("/transactions/{$qris->id}/void", ['reason' => 'Refund QRIS'])->assertSessionHas('success');
+        $this->assertDatabaseHas('shifts', ['id' => $shift->id, 'cash_sales' => 0, 'expected_cash' => 100000]);
     }
 
     public function test_cannot_void_already_voided_transaction(): void

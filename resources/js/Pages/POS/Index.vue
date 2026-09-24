@@ -15,6 +15,8 @@ import StickyBottomBar from '@/Components/Layout/StickyBottomBar.vue';
 import { useCartStore } from '@/Modules/POS/Stores/useCartStore';
 import { useCurrency } from '@/Composables/useCurrency';
 import { ShoppingCart } from 'lucide-vue-next';
+import { generateIdempotencyKey } from '@/Services/idempotency';
+import { assertOnline } from '@/Services/onlineMutations';
 
 const page = usePage();
 const cart = useCartStore();
@@ -43,11 +45,11 @@ const props = defineProps({
     },
     todayOrdersCount: {
         type: Number,
-        default: 148,
+        default: 0,
     },
     registerTotal: {
         type: Number,
-        default: 1850000,
+        default: 0,
     },
 });
 
@@ -66,9 +68,10 @@ const filteredProducts = computed(() => {
     });
 });
 
-// Pajak dihapus: Total pembayaran murni dari subtotal keranjang
+const taxAmount = computed(() => props.setting.tax_enabled ? Math.round(cart.subtotal * Number(props.setting.tax_percentage) * 100) / 10000 : 0);
+const serviceChargeAmount = computed(() => props.setting.service_charge_enabled ? Math.round(cart.subtotal * Number(props.setting.service_charge_percentage) * 100) / 10000 : 0);
 const totalPayable = computed(() => {
-    return cart.subtotal;
+    return cart.subtotal + taxAmount.value + serviceChargeAmount.value;
 });
 
 // Modals State
@@ -79,6 +82,7 @@ const showReceiptModal = ref(false);
 const completedTransaction = ref(null);
 const isProcessing = ref(false);
 const errorMessage = ref('');
+const checkoutKey = ref(null);
 
 // Add to Cart
 const handleAddToCart = (product) => {
@@ -99,8 +103,17 @@ const openPayment = () => {
 
 // Process Checkout with Backend
 const submitCheckout = async (paymentPayload = {}) => {
+    if (isProcessing.value) return;
+    try {
+        assertOnline();
+    } catch (error) {
+        errorMessage.value = error.message;
+        alert(error.message);
+        return;
+    }
     isProcessing.value = true;
     errorMessage.value = '';
+    checkoutKey.value ||= generateIdempotencyKey();
 
     try {
         const payload = {
@@ -111,6 +124,7 @@ const submitCheckout = async (paymentPayload = {}) => {
             })),
             payment_method: cart.paymentMethod,
             amount_paid: cart.paymentMethod === 'cash' ? paymentPayload.cashReceived : totalPayable.value,
+            idempotency_key: checkoutKey.value,
         };
 
         const response = await axios.post('/pos/checkout', payload);
@@ -121,8 +135,11 @@ const submitCheckout = async (paymentPayload = {}) => {
         showQrisModal.value = false;
         showReceiptModal.value = true;
         cart.clearCart();
+        checkoutKey.value = null;
     } catch (error) {
-        errorMessage.value = error.response?.data?.message || 'Gagal memproses transaksi. Silakan periksa kembali.';
+        errorMessage.value = error.code === 'OFFLINE_MUTATION'
+            ? error.message
+            : error.response?.data?.message || 'Koneksi terputus atau transaksi gagal. Keranjang tetap tersimpan. Periksa transaksi sebelum mencoba kembali.';
         alert(errorMessage.value);
     } finally {
         isProcessing.value = false;
@@ -199,11 +216,11 @@ const handleNewTransaction = () => {
                     <div class="sticky top-20">
                         <InvoicePanel
                             :active-cashier="{
-                                name: page.props.auth?.user?.name || 'Sarah Jenkins',
-                                shiftName: activeShift?.notes || 'Shift Siang',
+                                name: page.props.auth?.user?.name || 'Kasir',
+                                shiftName: activeShift?.notes || (activeShift ? 'Shift Aktif' : 'Belum Aktif'),
                             }"
                             :tax-rate="0"
-                            :is-tax-enabled="false"
+                            :setting="setting"
                             @open-payment-modal="openPayment"
                         />
                     </div>
@@ -239,11 +256,10 @@ const handleNewTransaction = () => {
         >
             <InvoicePanel
                 :active-cashier="{
-                    name: page.props.auth?.user?.name || 'Sarah Jenkins',
-                    shiftName: activeShift?.notes || 'Shift Siang',
+                    name: page.props.auth?.user?.name || 'Kasir',
+                    shiftName: activeShift?.notes || (activeShift ? 'Shift Aktif' : 'Belum Aktif'),
                 }"
-                :tax-rate="0"
-                :is-tax-enabled="false"
+                :setting="setting"
                 @open-payment-modal="openPayment"
             />
         </BottomSheet>

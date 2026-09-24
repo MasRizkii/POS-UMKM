@@ -20,11 +20,21 @@ const form = useForm({
     name: '',
     icon: '🥤',
 });
+const editingCategory = ref(null);
 
 const submitCategory = () => {
-    form.post(route('categories.store'), {
-        onSuccess: () => form.reset(),
-    });
+    const options = { onSuccess: () => { form.reset(); form.icon = '🥤'; editingCategory.value = null; } };
+    if (editingCategory.value) {
+        form.put(route('categories.update', editingCategory.value.id), options);
+    } else {
+        form.post(route('categories.store'), options);
+    }
+};
+
+const editCategory = (category) => {
+    editingCategory.value = category;
+    form.name = category.name;
+    form.icon = category.icon || '🥤';
 };
 
 const deleteCategory = (category) => {
@@ -91,7 +101,7 @@ const deleteCategory = (category) => {
                 >
                     <div class="flex items-center gap-2">
                         <span class="text-base">{{ cat.icon || '🥤' }}</span>
-                        <span class="font-bold text-text-primary">{{ cat.name }}</span>
+                        <button type="button" class="font-bold text-text-primary" @click="editCategory(cat)">{{ cat.name }}</button>
                     </div>
                     <button
                         type="button"
